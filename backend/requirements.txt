@@ -1,0 +1,6 @@
+Django==1.11
+django-filter==1.0.4
+djangorestframework==3.6.4
+django-rest-auth==0.9.1
+psycopg2==2.7.3
+PyYAML==3.12

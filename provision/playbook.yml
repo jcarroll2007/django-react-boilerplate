@@ -1,0 +1,184 @@
+---
+
+- hosts: all
+
+  vars:
+    server: /vagrant/backend
+    client: /vagrant/frontend
+
+  tasks:
+
+  - name: Add IUS repository to get python python 3.6
+    yum:
+      name: https://centos7.iuscommunity.org/ius-release.rpm
+    sudo: yes
+    ignore_errors: yes
+
+  ##
+  # Install Python
+  ##
+  - name: Install Python 3.6
+    yum: name={{item}}
+    with_items:
+      - python36u
+      - python36u-libs
+      - python36u-devel
+      - python36u-pip
+    sudo: yes
+
+  ##
+  # Disable Selinux
+  ##
+  - name: Disable selinux
+    selinux:
+      state: disabled
+    sudo: yes
+
+  ##
+  # Install Apache
+  ##
+  - name: Install Apache
+    yum: name={{item}}
+    with_items:
+      - httpd
+      - httpd-devel
+    sudo: yes
+
+  - name: Start and enable Apache
+    systemd:
+      name: httpd
+      state: started
+      enabled: yes
+    sudo: yes
+
+  ##
+  # Install and set up postgresql
+  ##
+  - name: Install PostgresQL
+    yum: name={{item}}
+    with_items:
+      - postgresql-server
+      - postgresql-contrib
+      - postgresql-libs
+      - postgresql-devel
+    sudo: yes
+
+  - name: Initiate database
+    sudo: yes
+    command: service postgresql initdb
+            creates=/var/lib/pgsql/data/postgresql.conf
+
+  - name: Start PostgreSQL and enable at boot
+    sudo: yes
+    service: name=postgresql
+            enabled=yes
+            state=started
+
+  - lineinfile: dest=/var/lib/pgsql/data/pg_hba.conf
+               regexp='host\s+all\s+all\s+127.0.0.1/32\s+ident'
+               line='host all all 127.0.0.1/32 md5'
+               insertbefore=BOF
+    notify: restart postgresql
+    sudo: yes
+
+  - lineinfile: dest=/var/lib/pgsql/data/pg_hba.conf
+               regexp='host\s+all\s+all\s+::1/128\s+ident'
+               line='host all all ::1/128 md5'
+               insertbefore=BOF
+    notify: restart postgresql
+    sudo: yes
+
+  - name: PostgreSQL enable at boot
+    sudo: yes
+    service: name=postgresql
+            enabled=yes
+
+  - name: Create PostgreSQL User
+    shell: psql -c "ALTER USER postgres PASSWORD 'password';"
+    sudo: yes
+    sudo_user: postgres
+
+  - name: Create PostgreSQL Database
+    shell: createdb mydb
+    failed_when: False
+    sudo: yes
+    sudo_user: postgres
+
+  ##
+  # Install mod_wsgi
+  ##
+  - name: Install gcc
+    yum: name=gcc
+    sudo: yes
+
+  - name: Install mod wsgi
+    unarchive:
+      src: https://github.com/GrahamDumpleton/mod_wsgi/archive/4.5.17.tar.gz
+      dest: /tmp
+      remote_src: True
+
+  - name: Configure mod_wsgi
+    shell: ./configure --with-python=/usr/bin/python3.6
+    args:
+      chdir: /tmp/mod_wsgi-4.5.17/
+
+  - name: Make mod_wsgi
+    make:
+      chdir: /tmp/mod_wsgi-4.5.17/
+      target: install
+    sudo: yes
+
+  ##
+  # Pip Install
+  ##
+  - name: Pip Install
+    pip:
+      requirements: "{{server}}/requirements.txt"
+      executable: pip3.6
+    sudo: yes
+
+  ##
+  # Copy apache conf
+  ##
+  - name: Copy Apache config
+    copy: src=django.conf dest=/etc/httpd/conf.d/django.conf
+    sudo: yes
+    notify: restart httpd
+
+  - name: Django Collectstatic
+    command: python3.6 manage.py collectstatic --noinput
+    args:
+      chdir: '{{server}}'
+    sudo: yes
+
+  ##
+  # Frontend Setup and provisioning
+  ##
+
+  - name: Download noad setup script
+    shell: "curl -sL https://rpm.nodesource.com/setup_6.x | bash -"
+    args:
+      chdir: /tmp/
+    sudo: yes
+
+  - name: Install nodejs
+    yum: name={{item}}
+    with_items:
+      - gcc-c++
+      - nodejs
+    sudo: yes
+
+  # - name: Install node modules
+  #   npm:
+  #     path: "{{client}}"
+  #   sudo: yes
+
+  handlers:
+
+  - name: restart postgresql
+    sudo: yes
+    service: name=postgresql state=restarted
+
+  - name: restart httpd
+    sudo: yes
+    service: name=httpd state=restarted
